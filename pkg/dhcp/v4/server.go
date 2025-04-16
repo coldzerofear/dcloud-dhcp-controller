@@ -78,20 +78,31 @@ var (
 	RTE_ETH_TX_OFFLOAD_UDP_CKSUM  = RTEBit64(2)
 )
 
-var once = sync.Once{}
+var (
+	ealInitOnce    = sync.Once{}
+	ealInitSuccess = false
+)
 
-func ealInit() (err error) {
-	once.Do(func() {
+func EALInit() (err error) {
+	ealInitOnce.Do(func() {
 		_, err = eal.Init(os.Args)
+		ealInitSuccess = err == nil
 	})
 	if err != nil {
-		once = sync.Once{}
+		ealInitOnce = sync.Once{}
+	}
+	return err
+}
+
+func EALCleanup() (err error) {
+	if ealInitSuccess {
+		err = eal.Cleanup()
 	}
 	return err
 }
 
 func NewDPDKServer(pciAddress string, handler server4.Handler, opts ...ServerOpt) (*DPDKServer, error) {
-	if err := ealInit(); err != nil {
+	if err := EALInit(); err != nil {
 		return nil, fmt.Errorf("failed to init EAL: %v", err)
 	}
 	port, err := ethdev.GetPortByName(pciAddress)

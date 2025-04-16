@@ -6,10 +6,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"tydic.io/dcloud-dhcp-controller/pkg/app"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	"tydic.io/dcloud-dhcp-controller/pkg/app"
+	v4 "tydic.io/dcloud-dhcp-controller/pkg/dhcp/v4"
 )
 
 func init() {
@@ -53,7 +54,6 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	mainApp := app.Register()
 
 	go func() {
@@ -64,4 +64,6 @@ func main() {
 	mainApp.Init()
 	mainApp.Run(ctx)
 	cancel()
+	time.Sleep(5 * time.Second)
+	_ = v4.EALCleanup()
 }
