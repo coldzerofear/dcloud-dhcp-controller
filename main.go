@@ -37,8 +37,8 @@ func CheckEnvs() error {
 }
 
 func main() {
+	log.Infof("(main) args: %v", os.Args)
 	log.Infof("(main) starting %s", app.ComponentName)
-
 	level, err := log.ParseLevel(os.Getenv("LOGLEVEL"))
 	if err != nil {
 		log.Warnf("(main) cannot determine loglevel, leaving it on Info")

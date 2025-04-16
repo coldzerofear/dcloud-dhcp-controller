@@ -82,17 +82,7 @@ var once = sync.Once{}
 
 func ealInit() (err error) {
 	once.Do(func() {
-		args := []string{
-			"app",                    // 程序名称（占位符，无实际作用）
-			"--no-huge",              // 禁用大页内存
-			"--single-file-segments", // 允许普通内存分段
-			"--log-level=8",          // 设置 DPDK 日志级别（8 对应 DEBUG 级别）
-			//"--lcores=0-3",         // 指定 DPDK 可用的逻辑 CPU 核心（用于线程绑定）
-			//"-n", "4",              // 内存通道数（通常与 NUMA 节点通道数一致）
-			"--file-prefix=dhcp", // 共享内存文件的唯一前缀（避免多进程冲突）
-			"--vfio-intr=legacy", // 指定 VFIO 设备的中断模式（legacy 或 MSI/MSI-X）
-		}
-		_, err = eal.Init(args)
+		_, err = eal.Init(os.Args)
 	})
 	if err != nil {
 		once = sync.Once{}
