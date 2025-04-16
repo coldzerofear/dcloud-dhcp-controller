@@ -105,17 +105,16 @@ func NewDPDKServer(pciAddress string, handler server4.Handler, opts ...ServerOpt
 	if err = port.MACAddrGet(&macAddr); err != nil {
 		return nil, fmt.Errorf("MACAddrGet error: %v", err)
 	}
+	mpName := fmt.Sprintf("mbuf_rx0_%s", pciAddress)
 	pool, err := mempool.CreateMbufPool(
-		"dhcp-mem-pool",
-		8192,
-		4096,
+		mpName,
+		512,
+		2048,
+		mempool.OptPrivateDataSize(0),
 		mempool.OptSocket(int(eal.SocketID())),
-		mempool.OptCacheSize(512))
+		mempool.OptCacheSize(0))
 	if err != nil {
 		return nil, fmt.Errorf("CreateMbufPool error: %v", err)
-	}
-	if err = port.PromiscEnable(); err != nil {
-		return nil, fmt.Errorf("PromiscEnable error: %v", err)
 	}
 
 	err = port.DevConfigure(
@@ -136,11 +135,17 @@ func NewDPDKServer(pciAddress string, handler server4.Handler, opts ...ServerOpt
 	if err != nil {
 		return nil, fmt.Errorf("DevConfigure error: %v", err)
 	}
-	// 接收队列
-	err = port.RxqSetup(0, 1024, pool,
+	// 启动接收队列
+	err = port.RxqSetup(0, 512, pool,
 		ethdev.OptSocket(int(eal.SocketID())))
 	if err != nil {
 		return nil, fmt.Errorf("RX queue setup failed: %v", err)
+	}
+	// 启动发送队列
+	err = port.TxqSetup(0, 512,
+		ethdev.OptSocket(int(eal.SocketID())))
+	if err != nil {
+		return nil, fmt.Errorf("TX queue setup failed: %v", err)
 	}
 	serv := &DPDKServer{
 		pciAddr:  pciAddress,
@@ -157,31 +162,15 @@ func NewDPDKServer(pciAddress string, handler server4.Handler, opts ...ServerOpt
 	return serv, nil
 }
 
-func (s *DPDKServer) Close() error {
-	s.isRunning = false
-	s.devPort.Stop()  // 停止网卡
-	s.devPort.Close() // 关闭端口
-	s.memPool.Free()
-	//if err := eal.Cleanup(); err != nil {
-	//	return err
-	//}
-	//defaultPath := "/var/run/dpdk"
-	//entries, err := os.ReadDir(defaultPath)
-	//if err != nil {
-	//	return nil
-	//}
-	//for _, entry := range entries {
-	//	if strings.Contains(entry.Name(), "dhcp-"+s.pciAddr) {
-	//		path := filepath.Join(defaultPath, entry.Name())
-	//		_ = os.RemoveAll(path)
-	//	}
-	//}
-	return nil
-}
-
 func (s *DPDKServer) Serve() error {
+	defer s.Close()
+
 	if err := s.devPort.Start(); err != nil {
 		return fmt.Errorf("dev port start failed: %v", err)
+	}
+
+	if err := s.devPort.PromiscEnable(); err != nil {
+		return fmt.Errorf("PromiscEnable error: %v", err)
 	}
 
 	s.isRunning = true
@@ -228,6 +217,28 @@ func (s *DPDKServer) Serve() error {
 			go s.handler(conn, upeer, pkt)
 		}
 	}
+	return nil
+}
+
+func (s *DPDKServer) Close() error {
+	s.isRunning = false
+	s.devPort.Stop()  // 停止网卡
+	s.devPort.Close() // 关闭端口
+	s.memPool.Free()
+	//if err := eal.Cleanup(); err != nil {
+	//	return err
+	//}
+	//defaultPath := "/var/run/dpdk"
+	//entries, err := os.ReadDir(defaultPath)
+	//if err != nil {
+	//	return nil
+	//}
+	//for _, entry := range entries {
+	//	if strings.Contains(entry.Name(), "dhcp-"+s.pciAddr) {
+	//		path := filepath.Join(defaultPath, entry.Name())
+	//		_ = os.RemoveAll(path)
+	//	}
+	//}
 	return nil
 }
 
