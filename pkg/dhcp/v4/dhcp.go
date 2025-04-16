@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/server4"
+	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -31,11 +33,6 @@ type DHCPLease struct {
 	SubnetKey string
 }
 
-type DHCPServer struct {
-	server     *server4.Server
-	cancelFunc context.CancelFunc
-}
-
 type DHCPAllocator struct {
 	ctx     context.Context
 	subnets map[string]OVNSubnet
@@ -48,7 +45,7 @@ type DHCPAllocator struct {
 	subnetPodKeys map[string]sets.String // SubnetKey -> PodKeys    mapping
 	podkeySubnets map[string]sets.String // PodKey    -> SubnetKeys mapping
 
-	servers map[string]DHCPServer
+	servers map[string]Server
 	mutex   sync.RWMutex
 }
 
@@ -63,7 +60,7 @@ func NewDHCPAllocator(ctx context.Context) *DHCPAllocator {
 	podkeyMACs := make(map[string]sets.String)
 	subnetPodKeys := make(map[string]sets.String)
 	podkeySubnets := make(map[string]sets.String)
-	servers := make(map[string]DHCPServer)
+	servers := make(map[string]Server)
 
 	return &DHCPAllocator{
 		ctx:           ctx,
@@ -381,9 +378,24 @@ func (a *DHCPAllocator) HasDHCPServer(nic string) bool {
 	return exist
 }
 
-func (a *DHCPAllocator) AddAndRun(nic string) error {
+func IsIPv4(ipAddr string) bool {
+	ip := net.ParseIP(ipAddr)
+	return ip != nil && strings.Contains(ipAddr, ".")
+}
+
+func GetFirstIPV4Addr(status networkv1.NetworkStatus) net.IP {
+	for _, ip := range status.IPs {
+		if IsIPv4(ip) {
+			return net.ParseIP(ip)
+		}
+	}
+	return nil
+}
+
+func (a *DHCPAllocator) AddAndRun(networkStatus networkv1.NetworkStatus) (err error) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
+	nic := networkStatus.Interface
 
 	log.Infof("(dhcpv4.AddAndRun) starting DHCP service on nic <%s>", nic)
 
@@ -391,33 +403,50 @@ func (a *DHCPAllocator) AddAndRun(nic string) error {
 		return fmt.Errorf("DHCPv4 server on nic <%s> already exists", nic)
 	}
 
-	// we need to listen on 0.0.0.0 otherwise client discovers will not be answered
-	addr := net.UDPAddr{
-		IP:   net.ParseIP("0.0.0.0"),
-		Port: 67,
+	var serverOpt Option
+	switch {
+	case networkStatus.DeviceInfo != nil && networkStatus.DeviceInfo.Type == "pci" &&
+		networkStatus.DeviceInfo.Pci != nil && len(networkStatus.DeviceInfo.Pci.PciAddress) > 0:
+		var opts []ServerOpt
+		if log.StandardLogger().GetLevel() >= log.DebugLevel {
+			opts = append(opts, WithDebugLogger())
+		}
+		pciAddress := networkStatus.DeviceInfo.Pci.PciAddress
+		var server *DPDKServer
+		serverIP := GetFirstIPV4Addr(networkStatus)
+		opts = append(opts, WithServerIP(serverIP))
+		if mac, err := net.ParseMAC(networkStatus.Mac); err == nil {
+			opts = append(opts, WithMacAddress(mac))
+		}
+		server, err = NewDPDKServer(pciAddress, a.dhcpHandler, opts...)
+		serverOpt = WithDPDKServer(server)
+	default:
+		// we need to listen on 0.0.0.0 otherwise client discovers will not be answered
+		addr := net.UDPAddr{
+			IP:   net.ParseIP("0.0.0.0"),
+			Port: 67,
+		}
+		var opt server4.ServerOpt
+		if log.StandardLogger().GetLevel() >= log.DebugLevel {
+			opt = server4.WithDebugLogger()
+		}
+		var server *server4.Server
+		server, err = server4.NewServer(nic, &addr, a.dhcpHandler, opt)
+		serverOpt = WithServer(server)
 	}
-	var opt server4.ServerOpt
-	if log.StandardLogger().GetLevel() == log.InfoLevel {
-		opt = server4.WithSummaryLogger()
-	}
-	if log.StandardLogger().GetLevel() >= log.DebugLevel {
-		opt = server4.WithDebugLogger()
-	}
-	server, err := server4.NewServer(nic, &addr, a.dhcpHandler, opt)
+
 	if err != nil {
 		return fmt.Errorf("error new DHCPv4 server on nic <%s>: %v", nic, err)
 	}
+
+	ctx, cancelFunc := context.WithCancel(a.ctx)
+	server := NewDHCPServer(serverOpt, WithCancelFunc(cancelFunc))
 
 	go func() {
 		log.Infof("(dhcpv4.AddAndRun) serve: %v", server.Serve())
 	}()
 
-	ctx, cancelFunc := context.WithCancel(a.ctx)
-
-	a.servers[nic] = DHCPServer{
-		server:     server,
-		cancelFunc: cancelFunc,
-	}
+	a.servers[nic] = server
 
 	go func() {
 		select {
@@ -444,12 +473,10 @@ func (a *DHCPAllocator) DelAndStop(nic string) error {
 		return nil
 	}
 
-	err := dhcpServer.server.Close()
+	err := dhcpServer.Close()
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return fmt.Errorf("error closing DHCPv4 server on nic <%s>: %v", nic, err)
 	}
-
-	dhcpServer.cancelFunc()
 
 	delete(a.servers, nic)
 

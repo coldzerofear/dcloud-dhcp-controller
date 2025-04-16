@@ -376,8 +376,7 @@ func (a *DHCPAllocator) dhcpHandler(conn net.PacketConn, peer net.Addr, m dhcpv6
 		resp.UpdateOption(ianaResponse)
 	}
 
-	_, err = conn.WriteTo(resp.ToBytes(), peer)
-	if err != nil {
+	if _, err = conn.WriteTo(resp.ToBytes(), peer); err != nil {
 		log.Errorf("(dhcpv6.dhcpHandler) Failure sending response: %s", err)
 	}
 }

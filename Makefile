@@ -59,7 +59,10 @@ test: fmt vet ## Run tests.
 
 .PHONY: build
 build: fmt vet ## Build binary.
-	CGO_ENABLED=0 GOOS=$(GOOS) CGO_ENABLED=0 GOOS=${TARGETOS:-linux} go build -o dhcp-controller .
+	CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
+	CGO_CFLAGS_ALLOW="-mrtm|-Wp,-D_FORTIFY_SOURCE.*|-fstack-protector.*" \
+ 	CGO_LDFLAGS_ALLOW="-Wl,--(?:no-)?whole-archive|-Wl,-z,now|-Wl,-z,relro" \
+    go build -ldflags="-extldflags=-Wl,--no-as-needed" -o dhcp-controller .
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

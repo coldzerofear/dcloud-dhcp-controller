@@ -120,19 +120,23 @@ spec:
         imagePullPolicy: Always
         resources:
           requests:
-            cpu: 20m
-            memory: 52Mi
-          limits:
             cpu: 500m
             memory: 512Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
         securityContext:
 #          runAsUser: 0
 #          runAsGroup: 0
           capabilities:
-            add: [ "NET_ADMIN" ]
+            add: ["SYS_ADMIN", "IPC_LOCK", "NET_ADMIN"]
         volumeMounts:
           - name: network-status
             mountPath: /etc/net-info
+          - name: vfio
+            mountPath: /dev/vfio
+          - name: pci
+            mountPath: /sys/bus/pci/devices
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       schedulerName: default-scheduler
@@ -145,6 +149,12 @@ spec:
               - path: networks-status-map
                 fieldRef:
                   fieldPath: metadata.annotations['k8s.v1.cni.cncf.io/network-status']
+        - name: vfio
+          hostPath:
+            path: /dev/vfio
+        - name: pci
+          hostPath:
+            path: /sys/bus/pci/devices
 ---
 apiVersion: v1
 kind: Service

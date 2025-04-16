@@ -56,7 +56,7 @@ func (c *Controller) handlerDHCPV4(subnet *kubeovnv1.Subnet, provider string, ne
 	}
 
 	// 6. if dhcpv4 server non-existent, add and run
-	if err := c.dhcpV4.AddAndRun(networkStatus.Interface); err != nil {
+	if err := c.dhcpV4.AddAndRun(networkStatus); err != nil {
 		c.recorder.Event(subnet, corev1.EventTypeWarning, "DHCPServerError",
 			fmt.Sprintf("The DHCPv4 server of network provider <%s> failed to start", provider))
 		return fmt.Errorf("network provider <%s> DHCPv4 service Startup failed: %v", provider, err)
