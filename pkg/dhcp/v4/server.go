@@ -188,44 +188,38 @@ func (s *DPDKServer) Serve() error {
 	s.logger.Printf("Server running on %s", s.pciAddr)
 	s.logger.Printf("Ready to handle requests")
 
-	mbufs := make([]*mbuf.Mbuf, 32)
 	for s.isRunning {
+		mbufs := make([]*mbuf.Mbuf, 32)
 		numRx := s.devPort.RxBurst(0, mbufs)
 		for i := uint16(0); i < numRx; i++ {
-			mData := mbufs[i].Data()
-			// 深拷贝数据，避免依赖 mbuf
-			data := make([]byte, len(mData))
-			copy(data, mData)
-			mbufs[i].PktMbufFree() // 立即释放
+			go func(mbuff *mbuf.Mbuf) {
+				defer mbuff.PktMbufFree()
 
-			conn := NewDPDKConn(0, s.devPort, s.serverIp, s.macAddr, s.memPool)
-			n, peer, err := conn.ReadFrom(data)
-			if err != nil {
-				s.logger.Printf("Error reading from packet conn: %v", err)
-				continue
-			}
-			s.logger.Printf("Handling request from %v", peer)
-
-			pkt, err := dhcpv4.FromBytes(extractDHCPPayload(data[:n]))
-			if err != nil {
-				s.logger.Printf("Error parsing DHCPv4 request: %v", err)
-				continue
-			}
-
-			conn.DHCPReq = pkt
-
-			upeer, ok := peer.(*net.UDPAddr)
-			if !ok {
-				s.logger.Printf("Not a UDP connection? Peer is %s", peer)
-				continue
-			}
-
-			// Set peer to broadcast if the client did not have an IP.
-			if upeer.IP == nil || upeer.IP.To4().Equal(net.IPv4zero) {
-				upeer.IP = net.IPv4bcast
-			}
-
-			go s.handler(conn, upeer, pkt)
+				data := mbuff.Data()
+				conn := NewDPDKConn(0, s.devPort, s.serverIp, s.macAddr, s.memPool)
+				n, peer, err := conn.ReadFrom(data)
+				if err != nil {
+					s.logger.Printf("Error reading from packet conn: %v", err)
+					return
+				}
+				s.logger.Printf("Handling request from %v", peer)
+				pkt, err := dhcpv4.FromBytes(extractDHCPPayload(data[:n]))
+				if err != nil {
+					s.logger.Printf("Error parsing DHCPv4 request: %v", err)
+					return
+				}
+				conn.DHCPReq = pkt
+				upeer, ok := peer.(*net.UDPAddr)
+				if !ok {
+					s.logger.Printf("Not a UDP connection? Peer is %s", peer)
+					return
+				}
+				// Set peer to broadcast if the client did not have an IP.
+				if upeer.IP == nil || upeer.IP.To4().Equal(net.IPv4zero) {
+					upeer.IP = net.IPv4bcast
+				}
+				s.handler(conn, upeer, pkt)
+			}(mbufs[i])
 		}
 	}
 	return nil
@@ -236,20 +230,6 @@ func (s *DPDKServer) Close() error {
 	s.devPort.Stop()  // 停止网卡
 	s.devPort.Close() // 关闭端口
 	s.memPool.Free()
-	//if err := eal.Cleanup(); err != nil {
-	//	return err
-	//}
-	//defaultPath := "/var/run/dpdk"
-	//entries, err := os.ReadDir(defaultPath)
-	//if err != nil {
-	//	return nil
-	//}
-	//for _, entry := range entries {
-	//	if strings.Contains(entry.Name(), "dhcp-"+s.pciAddr) {
-	//		path := filepath.Join(defaultPath, entry.Name())
-	//		_ = os.RemoveAll(path)
-	//	}
-	//}
 	return nil
 }
 
