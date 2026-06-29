@@ -103,8 +103,8 @@ func (c *Controller) handlerDHCPV6(subnet *kubeovnv1.Subnet, provider string, ne
 	// 5. check dhcpv6 server already exists
 	if exist := c.dhcpV6.HasDHCPServer(networkStatus.Interface); exist {
 		log.Warnf("(subnet.handlerDHCPV6) Subnet <%s> network provider <%s> DHCP service already exists", subnet.Name, provider)
-		// update dhcp v4 server gauge
-		c.metrics.UpdateDHCPv4ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
+		// update dhcp v6 server gauge
+		c.metrics.UpdateDHCPv6ServerInfo(networkStatus.Name, networkStatus.Interface, ovnSubnet.ServerIP.String(), ovnSubnet.ServerMac)
 		return nil
 	}
 
